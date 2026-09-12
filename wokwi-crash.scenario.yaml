@@ -1,0 +1,17 @@
+# The crash scenario: this run REQUIRES the stack-overflow panic, which
+# turns CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY from a config line
+# into a tested claim. It waits for the t=10s heartbeat FIRST, so this
+# run also proves a healthy system that outlives the 5 s task watchdog -
+# then types `crash` and demands that the canary names the task.
+# (CI runs this wokwi-cli invocation WITHOUT --fail-text: the panic's
+# error lines are the expected outcome here.) Total sim time ~12 s.
+name: "the canary catches the deliberate stack overflow, and names the task"
+version: 1
+author: "Elias Dwallo"
+
+steps:
+  - wait-serial: "shell: commands: hwm | inv | crash"
+  - wait-serial: "alive t=10s"
+  - write-serial: "crash\n"
+  - wait-serial: "crash: victim task up with 2048 bytes of stack"
+  - wait-serial: "A stack overflow in task victim has been detected"

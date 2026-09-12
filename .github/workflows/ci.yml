@@ -1,0 +1,100 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The aggregator's arithmetic, asserted on every commit: fold edges,
+  # mean rounding, full-scale windows, the wire layout, the synthetic
+  # source - and a 100% branch gate on agg_core.h. No hardware, no
+  # secrets - runs on a fork.
+  host:
+    name: host tests (fold + rounding + branch coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: fold edges, rounding, extremes, wire layout, synth, gate
+        run: make -C test
+
+      - name: keep the coverage summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence
+          path: |
+            test/build/gcov_summary.txt
+            test/build/*.gcov
+          if-no-files-found: error
+
+  # Builds the real firmware and runs it in Wokwi TWICE. The healthy run
+  # types `hwm` and `inv` into the shell and requires the firmware's own
+  # verdict lines: every task's stack high-water above its declared
+  # margin, and priority inheritance provably collapsing the inversion
+  # spike. The crash run types `crash` and REQUIRES the stack-overflow
+  # canary panic to name the victim task. Both runs must reach the t=10s
+  # heartbeat, outliving the 5 s task watchdog.
+  firmware:
+    name: build + simulate (healthy + canary crash)
+    runs-on: ubuntu-latest
+    env:
+      WOKWI_CLI_TOKEN: ${{ secrets.WOKWI_CLI_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: build with ESP-IDF v5.3
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.3
+          target: esp32
+          command: idf.py build && idf.py uf2
+
+      # docs/linker-map.md quotes these numbers; keeping them printed on
+      # every run (and the .map in the artifact) keeps the doc traceable.
+      - name: report image size and per-component sizes
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.3
+          target: esp32
+          command: idf.py size && idf.py size-components
+
+      # Skipped automatically on forks and on clones without the secret
+      # set. Get a free token at https://wokwi.com/dashboard/ci
+      #
+      # wokwi-cli is invoked directly (not via wokwi-ci-action) so each
+      # run's full serial log comes back as an artifact - for the crash
+      # run that log IS the bug-gallery evidence.
+      - name: install wokwi-cli
+        if: env.WOKWI_CLI_TOKEN != ''
+        run: |
+          wget -q -O /usr/local/bin/wokwi-cli \
+            https://github.com/wokwi/wokwi-cli/releases/latest/download/wokwi-cli-linuxstatic-x64
+          chmod +x /usr/local/bin/wokwi-cli
+
+      - name: simulate healthy - hwm margins, inheritance verdict, heartbeat
+        if: env.WOKWI_CLI_TOKEN != ''
+        run: |
+          wokwi-cli --timeout 25000 --fail-text 'E (' \
+            --scenario wokwi-ci.scenario.yaml \
+            --serial-log-file wokwi-serial-healthy.log .
+
+      # No --fail-text here: the panic's error lines are the point.
+      - name: simulate crash - the canary must catch it and name the task
+        if: env.WOKWI_CLI_TOKEN != ''
+        run: |
+          wokwi-cli --timeout 25000 \
+            --scenario wokwi-crash.scenario.yaml \
+            --serial-log-file wokwi-serial-crash.log .
+
+      - name: keep the firmware image, map and serial logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: |
+            build/uf2.bin
+            build/freertos-task-architecture.elf
+            build/freertos-task-architecture.map
+            wokwi-serial-healthy.log
+            wokwi-serial-crash.log
+          if-no-files-found: warn

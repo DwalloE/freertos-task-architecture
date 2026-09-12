@@ -1,0 +1,21 @@
+# The healthy scenario. The assertions ride on lines the FIRMWARE
+# computes: "hwm: all margins OK" is the stack audit's own arithmetic
+# (every task's high-water above its declared margin) and
+# "inv: inheritance OK" is the inversion experiment's own comparison
+# (mutex blocked-time collapsed vs the binary semaphore's spike) - a
+# scenario can match text but cannot compare numbers (03's `-> plausible`
+# pattern). The closing "alive t=10s" makes the run outlive the 5 s task
+# watchdog (01's lesson). Total sim time ~12 s.
+name: "hwm margins hold, priority inheritance works, nobody starves"
+version: 1
+author: "Elias Dwallo"
+
+steps:
+  - wait-serial: "shell: commands: hwm | inv | crash"
+  - write-serial: "hwm\n"
+  - wait-serial: "hwm: all margins OK"
+  - write-serial: "inv\n"
+  - wait-serial: "inv: binary semaphore (no inheritance): high-prio blocked"
+  - wait-serial: "inv: mutex (priority inheritance):      high-prio blocked"
+  - wait-serial: "inv: inheritance OK"
+  - wait-serial: "alive t=10s"

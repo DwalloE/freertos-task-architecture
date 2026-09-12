@@ -1,0 +1,19 @@
+# Wokwi simulator / Wokwi CI configuration.
+#
+# `firmware` is a single image containing bootloader + partition table +
+# application, because Wokwi flashes one file. `idf.py uf2` produces exactly
+# that at build/uf2.bin:
+#
+#     idf.py build && idf.py uf2
+#
+# `elf` gives the simulator symbol names - which matters more than usual
+# here: the crash scenario's whole point is a readable panic backtrace.
+#
+# No parts beyond the board and the serial monitor: the workload is
+# synthetic and the evidence is serial text (both directions - the CI
+# scenarios TYPE the shell commands).
+
+[wokwi]
+version = 1
+firmware = 'build/uf2.bin'
+elf = 'build/freertos-task-architecture.elf'
