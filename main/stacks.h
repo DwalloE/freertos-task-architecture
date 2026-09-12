@@ -26,9 +26,9 @@
 /* sampler: synthesis + a 8-byte encode chunk, no printf on its hot path */
 #define SAMPLER_STACK_BYTES     2560
 
-/* aggregator: the fold plus a 512-byte receive chunk - ON ITS STACK for
- * now; docs/linker-map.md moves it to .bss and re-derives this number */
-#define AGGREGATOR_STACK_BYTES  3328
+/* aggregator: the fold; its 512-byte receive chunk moved to .bss (see
+ * docs/linker-map.md for the before/after), so the stack shrank with it */
+#define AGGREGATOR_STACK_BYTES  2816
 
 /* uplink: one printf per window - printf is the stack hog here */
 #define UPLINK_STACK_BYTES      3072

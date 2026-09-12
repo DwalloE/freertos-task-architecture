@@ -17,11 +17,12 @@ void aggregator_task(void *arg)
 {
     (void)arg;
 
-    /* Receive chunk lives on the task stack for now. The linker-map
-     * experiment (docs/linker-map.md) moves it to static storage and
-     * re-measures both .bss and this task's high-water mark - this
-     * buffer is the "one buffer" that doc talks about. */
-    uint8_t chunk[512];
+    /* The linker-map experiment's "one buffer" (docs/linker-map.md):
+     * static, so its 512 bytes are a named symbol in .bss instead of an
+     * anonymous slice of this task's stack - the before/after numbers
+     * for both homes are in that doc. Safe as a static ONLY because this
+     * task is the stream's single reader; a second reader would share it. */
+    static uint8_t chunk[512];
 
     /* A sample is 2 bytes; a stream buffer hands back BYTES with no
      * message framing, so a read may split a sample. Carry the odd byte. */
