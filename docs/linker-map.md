@@ -79,8 +79,20 @@ Three things this table says that hand-waving does not:
 
 The stack side of the ledger is not taken on faith: the `hwm` shell command re-measures
 every task's high-water mark, and CI's healthy scenario requires the firmware's own
-`hwm: all margins OK` verdict on every run — the per-task figures print in the
-`wokwi-serial-healthy.log` artifact.
+`hwm: all margins OK` verdict on every run. Measured in the shipped configuration (run
+34691078128, `wokwi-serial-healthy.log`):
+
+```text
+hwm: task        declared  high-water  min-margin  verdict
+hwm: sampler         2560        2044         512  ok
+hwm: aggregator      2816        2248         512  ok
+hwm: uplink          3072        2532         512  ok
+hwm: supervisor      3584        2184         512  ok
+hwm: all margins OK
+```
+
+The aggregator keeps 2,248 bytes of headroom at the reduced 2,816 declaration — the
+512-byte cut came out of bytes the task, minus its buffer, never touched.
 
 ## Honest limits
 

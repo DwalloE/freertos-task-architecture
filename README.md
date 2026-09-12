@@ -56,17 +56,31 @@ idf.py flash monitor       # then type: hwm | inv | crash
 ## The bug gallery
 
 - **The canary catches the deliberate overflow.** `crash` spawns a 2048-byte-stack victim
-  that recurses past its end; the canary check panics **naming the task**:
+  that scribbles past its end; the canary check panics **naming the task** (CI run
+  34691078128, `wokwi-serial-crash.log` — the scenario stops the sim on the match):
 
   ```text
-  (the CI-captured panic lands here after the first simulate run)
+  > crash: victim task up with 2048 bytes of stack, scribbling past the end on purpose
+
+  ***ERROR*** A stack overflow in task victim has been detected
   ```
 
   The fix is the discipline the rest of the repo practices: declared sizes derived from
   measured high-water plus an enforced margin, re-audited by `hwm` on every CI run.
-- **The inversion numbers.** Binary semaphore vs mutex, same tasks, same core
-  — measured figures from the CI run land here (structure: the semaphore round's blocked
-  time balloons toward the 300 ms spin; the mutex round collapses to ≈ the 50 ms hold).
+- **The inversion numbers.** Same three tasks, same core, only the lock type changes
+  (CI run 34691078128, `wokwi-serial-healthy.log`):
+
+  ```text
+  inv: lock held 50 ms by prio-5 task; prio-6 spinner runs 300 ms; prio-8 waiter measured
+  inv: binary semaphore (no inheritance): high-prio blocked 310040 us
+  inv: mutex (priority inheritance):      high-prio blocked 40233 us
+  inv: ratio 7.7x
+  inv: inheritance OK
+  ```
+
+  On the semaphore the waiter is blocked for the *bystander's* whole 300 ms spin (plus
+  the hold); the mutex lends the holder the waiter's priority and the spike collapses to
+  ≈ the hold time.
 - **The overflow demo that took three tries** — the strongest argument in this repo for
   CI that *requires* the panic. **v1** recursed by high-water mark and stopped *while
   headroom remained*: the victim parked ~200 bytes short of the canary and never
