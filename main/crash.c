@@ -20,6 +20,11 @@
 #include "app_tasks.h"
 #include "stacks.h"
 
+/* GCC is right that this never terminates normally: one branch recurses,
+ * the other parks forever waiting for the canary panic. That is the demo.
+ * Silence exactly this diagnostic, here only. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winfinite-recursion"
 static void __attribute__((noinline)) eat_stack(uint32_t depth)
 {
     volatile uint8_t frame[128];
@@ -35,6 +40,7 @@ static void __attribute__((noinline)) eat_stack(uint32_t depth)
         for (;;) vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
+#pragma GCC diagnostic pop
 
 static void victim_task(void *arg)
 {
