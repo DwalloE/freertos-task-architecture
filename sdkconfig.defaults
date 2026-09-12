@@ -1,0 +1,24 @@
+# 03's baseline, plus what this repo is about.
+
+CONFIG_IDF_TARGET="esp32"
+
+# -O2: task timing and stack numbers measured at -O0 would be fiction.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_TIMESTAMP_SOURCE_RTOS=y
+
+# Task watchdog left ON deliberately: both CI scenarios run past the 5 s
+# window (they wait for the t=10s heartbeat) to prove nobody starves.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+
+# The canary IS the demo: the `crash` command overruns a task stack and
+# the crash scenario REQUIRES the resulting panic to name the task.
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+
+# Trace facility: task stats for the hwm audit and anything a debugger asks.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
