@@ -1,0 +1,11 @@
+build/
+test/build/
+*.gcno
+*.gcda
+*.gcov
+managed_components/
+sdkconfig
+dependencies.lock
+CLAUDE-HANDOFF.md
+# CI serial captures; the annotated evidence lives in docs/ and the README.
+wokwi-serial*.log
