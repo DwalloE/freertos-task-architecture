@@ -67,13 +67,19 @@ idf.py flash monitor       # then type: hwm | inv | crash
 - **The inversion numbers.** Binary semaphore vs mutex, same tasks, same core
   — measured figures from the CI run land here (structure: the semaphore round's blocked
   time balloons toward the 300 ms spin; the mutex round collapses to ≈ the 50 ms hold).
-- **The overflow demo that didn't overflow.** The first `crash` walked the stack down by
-  high-water mark and stopped *while headroom remained* — the victim parked ~200 bytes
-  short of the canary and never panicked. Caught on the browser demo's screen recording:
-  `crash: victim task up...` and then silence, twice. Fix: walk near the edge, then
-  `plunge()` one deliberately-oversized 512-byte frame across it. Lesson: a safety-net
-  demo must *prove* the net fires — which is exactly why CI runs a scenario that
-  **requires** the panic.
+- **The overflow demo that took three tries** — the strongest argument in this repo for
+  CI that *requires* the panic. **v1** recursed by high-water mark and stopped *while
+  headroom remained*: the victim parked ~200 bytes short of the canary and never
+  panicked (caught in the browser demo's screen recording — `crash: victim task up...`
+  then silence, twice). **v2** plunged a blind 512-byte frame "just past" the edge:
+  it overshot the stack into the heap, the victim wedged spinning (`E task_wdt: CPU 1:
+  victim`), starved the aggregator (`task stalled: alive bits 0x5`), and there was
+  *still* no canary panic — the canary only sees writes that cross the stack's edge,
+  not carnage beyond it (CI run 34690787832, `wokwi-serial-crash.log`). **v3** asks the
+  kernel where the stack actually ends (`vTaskGetInfo` → `pxStackBase`) and stomps from
+  the live frames exactly down to that base: full genuine overflow, canary included,
+  zero collateral damage, deterministic panic. Both failed versions passed a casual
+  eyeball test; only a scenario that demands the panic text told the truth.
 - **The orchestrator that starved itself.** In the Arduino-core port, `inv` measured
   **9 µs blocked on both rounds** — no spike, nothing to collapse. `loop()` (the
   orchestrator) runs on core 1 at priority 1 in the Arduino core, the same core the

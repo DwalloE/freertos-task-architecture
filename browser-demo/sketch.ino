@@ -231,26 +231,21 @@ static void inversionRun()
 }
 
 /* ---------------------------------------------------------------- crash -- */
-static void __attribute__((noinline)) plunge(void)
-{
-  /* One frame bigger than any headroom eatStack leaves, so the write
-   * provably crosses the canary; the next context switch panics. */
-  volatile uint8_t last[512];
-  for (unsigned i = 0; i < sizeof last; i++) last[i] = 0xEE;
-  for (;;) vTaskDelay(pdMS_TO_TICKS(50));
-}
-static void __attribute__((noinline)) eatStack(uint32_t depth)
-{
-  volatile uint8_t frame[128];
-  for (unsigned i = 0; i < sizeof frame; i++) frame[i] = (uint8_t)depth;
-  if (uxTaskGetStackHighWaterMark(NULL) > sizeof frame + 96) eatStack(depth + 1);
-  else plunge();                     /* walk to the edge, step over it */
-}
 static void victimTask(void *)
 {
-  Serial.println("crash: victim task up with 2048 bytes of stack, recursing "
+  Serial.println("crash: victim task up with 2048 bytes of stack, scribbling "
                  "past the end on purpose");
-  eatStack(1);
+  /* Ask the kernel where this stack really ends (its lowest address -
+   * the canary lives there), then stomp from here exactly down to it:
+   * a full genuine overflow, zero collateral heap damage. The next
+   * context switch runs the canary check and panics naming this task. */
+  TaskStatus_t st;
+  vTaskGetInfo(NULL, &st, pdFALSE, eRunning);
+  volatile uint8_t *base = (volatile uint8_t *)st.pxStackBase;
+  volatile uint8_t marker;
+  volatile uint8_t *p = &marker;
+  while (p > base) *--p = 0xEE;
+  for (;;) vTaskDelay(pdMS_TO_TICKS(50));
 }
 static void crashNow()
 {

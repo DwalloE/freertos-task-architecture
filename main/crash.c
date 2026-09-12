@@ -1,19 +1,24 @@
 /*
  * crash.c - the stack-overflow demo. `crash` spawns a victim task with a
- * deliberately small stack and recurses until the frames run past the
- * end, overwriting the canary bytes FreeRTOS painted at the stack's far
- * edge. The next context switch runs the canary check
- * (CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY) and panics NAMING THE
- * TASK - that panic text is what the second CI scenario requires, which
- * turns the safety net from a config line into a tested claim.
+ * deliberately small stack that scribbles from its current stack position
+ * down THROUGH the canary bytes FreeRTOS painted at the far edge -
+ * exactly the damage runaway recursion does. The next context switch
+ * runs the canary check (CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY) and
+ * panics NAMING THE TASK - that panic text is what the second CI
+ * scenario requires, which turns the safety net from a config line into
+ * a tested claim.
  *
- * The recursion watches its own high-water mark to walk NEAR the edge,
- * then one deliberately-oversized final frame plunges past it, so the
- * overshoot beyond the canary is a few hundred bytes, not kilobytes of
- * heap scribbling - we want the canary panic, not a random heap crash.
- * (First version stopped while headroom remained and never overflowed at
- * all - caught by Elias's screen recording of the browser demo, where
- * `crash` parked forever instead of panicking. README bug gallery.)
+ * Third design, and the two dead ones are the README bug gallery's best
+ * entries: v1 recursed by high-water mark and stopped WHILE HEADROOM
+ * REMAINED - never touched the canary, never panicked (caught in Elias's
+ * screen recording). v2 plunged a blind 512-byte frame "just past" the
+ * edge - overshot the stack into the heap, wedged the victim spinning
+ * (task WDT: "CPU 1: victim"), starved the aggregator, still no canary
+ * panic (CI run 34690787832). v3 asks the kernel where the stack
+ * actually ends (vTaskGetInfo -> pxStackBase, available because
+ * CONFIG_FREERTOS_USE_TRACE_FACILITY=y) and stomps from here exactly TO
+ * that base: a full, genuine overflow of everything below the live
+ * frames, canary included, and not one byte of collateral heap damage.
  */
 #include <stdio.h>
 
@@ -23,42 +28,29 @@
 #include "app_tasks.h"
 #include "stacks.h"
 
-/* GCC is right that this never terminates normally: one branch recurses,
- * the other parks forever waiting for the canary panic. That is the demo.
- * Silence exactly this diagnostic, here only. */
-/* The final frame: bigger than any headroom eat_stack leaves behind, so
- * writing it provably crosses the canary at the stack's far edge. Then
- * park - the very next context switch runs the canary check and panics. */
-static void __attribute__((noinline)) plunge(void)
-{
-    volatile uint8_t last[512];
-    for (unsigned i = 0; i < sizeof last; i++)
-        last[i] = 0xEE;
-    for (;;) vTaskDelay(pdMS_TO_TICKS(50));
-}
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Winfinite-recursion"
-static void __attribute__((noinline)) eat_stack(uint32_t depth)
-{
-    volatile uint8_t frame[128];
-    for (unsigned i = 0; i < sizeof frame; i++)
-        frame[i] = (uint8_t)depth;              /* really touch every byte */
-
-    if (uxTaskGetStackHighWaterMark(NULL) > sizeof frame + 96)
-        eat_stack(depth + 1);                   /* walk down to the edge... */
-    else
-        plunge();                               /* ...and step over it */
-}
-#pragma GCC diagnostic pop
-
 static void victim_task(void *arg)
 {
     (void)arg;
-    printf("crash: victim task up with %d bytes of stack, recursing past "
+    printf("crash: victim task up with %d bytes of stack, scribbling past "
            "the end on purpose\n", VICTIM_STACK_BYTES);
-    eat_stack(1);
-    vTaskDelete(NULL);                          /* not reached */
+
+    /* Where does this task's stack really end? pxStackBase is its lowest
+     * address - the canary lives in the first bytes there. */
+    TaskStatus_t st;
+    vTaskGetInfo(NULL, &st, pdFALSE, eRunning);
+    volatile uint8_t *base = (volatile uint8_t *)st.pxStackBase;
+
+    /* From (roughly) the current stack pointer, walk down to base,
+     * overwriting everything: the untouched 0xa5 fill, then the canary.
+     * Writing below SP is safe here - nothing lives there until the
+     * vTaskDelay below builds its frames in the freshly-stomped area. */
+    volatile uint8_t marker;
+    volatile uint8_t *p = &marker;
+    while (p > base)
+        *--p = 0xEE;
+
+    /* Switch out; the scheduler's canary check does the rest. */
+    for (;;) vTaskDelay(pdMS_TO_TICKS(50));
 }
 
 void crash_now(void)
