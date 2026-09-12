@@ -7,10 +7,13 @@
  * TASK - that panic text is what the second CI scenario requires, which
  * turns the safety net from a config line into a tested claim.
  *
- * The recursion watches its own high-water mark and stops adding frames
- * only when the headroom is already smaller than a frame, so the
- * overshoot past the canary is one frame (~200 bytes), not kilobytes of
+ * The recursion watches its own high-water mark to walk NEAR the edge,
+ * then one deliberately-oversized final frame plunges past it, so the
+ * overshoot beyond the canary is a few hundred bytes, not kilobytes of
  * heap scribbling - we want the canary panic, not a random heap crash.
+ * (First version stopped while headroom remained and never overflowed at
+ * all - caught by Elias's screen recording of the browser demo, where
+ * `crash` parked forever instead of panicking. README bug gallery.)
  */
 #include <stdio.h>
 
@@ -23,6 +26,17 @@
 /* GCC is right that this never terminates normally: one branch recurses,
  * the other parks forever waiting for the canary panic. That is the demo.
  * Silence exactly this diagnostic, here only. */
+/* The final frame: bigger than any headroom eat_stack leaves behind, so
+ * writing it provably crosses the canary at the stack's far edge. Then
+ * park - the very next context switch runs the canary check and panics. */
+static void __attribute__((noinline)) plunge(void)
+{
+    volatile uint8_t last[512];
+    for (unsigned i = 0; i < sizeof last; i++)
+        last[i] = 0xEE;
+    for (;;) vTaskDelay(pdMS_TO_TICKS(50));
+}
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Winfinite-recursion"
 static void __attribute__((noinline)) eat_stack(uint32_t depth)
@@ -31,14 +45,10 @@ static void __attribute__((noinline)) eat_stack(uint32_t depth)
     for (unsigned i = 0; i < sizeof frame; i++)
         frame[i] = (uint8_t)depth;              /* really touch every byte */
 
-    if (uxTaskGetStackHighWaterMark(NULL) > sizeof frame + 96) {
-        eat_stack(depth + 1);
-    } else {
-        /* Headroom is now less than one more frame: the frame above just
-         * crossed (or grazed) the canary. Yield so the scheduler switches
-         * us out and the canary check runs. */
-        for (;;) vTaskDelay(pdMS_TO_TICKS(50));
-    }
+    if (uxTaskGetStackHighWaterMark(NULL) > sizeof frame + 96)
+        eat_stack(depth + 1);                   /* walk down to the edge... */
+    else
+        plunge();                               /* ...and step over it */
 }
 #pragma GCC diagnostic pop
 

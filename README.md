@@ -10,7 +10,7 @@ tripping it on demand in CI.
 
 ## Run it in your browser
 
-Wokwi project: **link lands here when the saved project is up** — type `hwm`, `inv`, then
+Wokwi project: **https://wokwi.com/projects/474954927923025921** — type `hwm`, `inv`, then
 `crash` into the serial monitor (the input bar is the strip at the very bottom). The
 browser project runs `browser-demo/sketch.ino`, a clearly-labeled Arduino-core port,
 because browser Wokwi cannot compile ESP-IDF; the four tasks, both lock types and all
@@ -67,7 +67,21 @@ idf.py flash monitor       # then type: hwm | inv | crash
 - **The inversion numbers.** Binary semaphore vs mutex, same tasks, same core
   — measured figures from the CI run land here (structure: the semaphore round's blocked
   time balloons toward the 300 ms spin; the mutex round collapses to ≈ the 50 ms hold).
-- Whatever else the simulator catches lands here, with symptom and fix.
+- **The overflow demo that didn't overflow.** The first `crash` walked the stack down by
+  high-water mark and stopped *while headroom remained* — the victim parked ~200 bytes
+  short of the canary and never panicked. Caught on the browser demo's screen recording:
+  `crash: victim task up...` and then silence, twice. Fix: walk near the edge, then
+  `plunge()` one deliberately-oversized 512-byte frame across it. Lesson: a safety-net
+  demo must *prove* the net fires — which is exactly why CI runs a scenario that
+  **requires** the panic.
+- **The orchestrator that starved itself.** In the Arduino-core port, `inv` measured
+  **9 µs blocked on both rounds** — no spike, nothing to collapse. `loop()` (the
+  orchestrator) runs on core 1 at priority 1 in the Arduino core, the same core the
+  experiment pinned its participants to; during `low`'s 50 ms lock hold the orchestrator
+  was starved, so the high-priority waiter was only created after the lock was already
+  free. Fix: participants on core 0, orchestrator on core 1. The ESP-IDF firmware never
+  had this bug — its supervisor lives on core 0 — but it is the same lesson the demo
+  teaches: a lower-priority task sharing a core with spinners does not run.
 
 ## How it is tested
 

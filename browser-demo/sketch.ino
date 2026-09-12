@@ -71,7 +71,7 @@ static QueueHandle_t        uplinkQueue;
 static TaskHandle_t hSampler, hAgg, hUplink;
 
 #define SAMPLER_STACK 2560
-#define AGG_STACK     3328
+#define AGG_STACK     2816
 #define UPLINK_STACK  3072
 #define MARGIN_MIN    512
 
@@ -192,12 +192,17 @@ static int64_t invRound(bool useMutex)
   else { ctx.lock = xSemaphoreCreateBinary(); xSemaphoreGive(ctx.lock); }
   ctx.done = xSemaphoreCreateCounting(3, 0);
 
-  /* All on core 1, on purpose: a migratable task dodges the inversion. */
-  xTaskCreatePinnedToCore(invLow, "inv_low", 2560, &ctx, 5, NULL, 1);
+  /* All on ONE core, on purpose: a migratable task dodges the inversion.
+   * Core 0 here, NOT core 1 as in main/: the Arduino core runs loop() -
+   * this orchestrator - on core 1 at priority 1, and putting the
+   * participants beside it starves the orchestrator during low's hold,
+   * so high gets created only after the lock is already free (measured:
+   * 9 us blocked on both rounds - see the README bug gallery). */
+  xTaskCreatePinnedToCore(invLow, "inv_low", 2560, &ctx, 5, NULL, 0);
   while (!ctx.lowHasLock) vTaskDelay(pdMS_TO_TICKS(10));
-  xTaskCreatePinnedToCore(invHigh, "inv_high", 2560, &ctx, 8, NULL, 1);
+  xTaskCreatePinnedToCore(invHigh, "inv_high", 2560, &ctx, 8, NULL, 0);
   vTaskDelay(pdMS_TO_TICKS(10));
-  xTaskCreatePinnedToCore(invMid, "inv_mid", 2560, &ctx, 6, NULL, 1);
+  xTaskCreatePinnedToCore(invMid, "inv_mid", 2560, &ctx, 6, NULL, 0);
 
   bool ok = true;
   for (int i = 0; i < 3; i++)
@@ -210,7 +215,7 @@ static int64_t invRound(bool useMutex)
 static void inversionRun()
 {
   Serial.println("inv: lock held 50 ms by prio-5 task; prio-6 spinner runs "
-                 "300 ms; prio-8 waiter measured; all on core 1");
+                 "300 ms; prio-8 waiter measured; all on core 0");
   int64_t semUs = invRound(false);
   int64_t mutUs = invRound(true);
   if (semUs < 0 || mutUs < 0) { Serial.println("inv: EXPERIMENT WEDGED"); return; }
@@ -226,12 +231,20 @@ static void inversionRun()
 }
 
 /* ---------------------------------------------------------------- crash -- */
+static void __attribute__((noinline)) plunge(void)
+{
+  /* One frame bigger than any headroom eatStack leaves, so the write
+   * provably crosses the canary; the next context switch panics. */
+  volatile uint8_t last[512];
+  for (unsigned i = 0; i < sizeof last; i++) last[i] = 0xEE;
+  for (;;) vTaskDelay(pdMS_TO_TICKS(50));
+}
 static void __attribute__((noinline)) eatStack(uint32_t depth)
 {
   volatile uint8_t frame[128];
   for (unsigned i = 0; i < sizeof frame; i++) frame[i] = (uint8_t)depth;
   if (uxTaskGetStackHighWaterMark(NULL) > sizeof frame + 96) eatStack(depth + 1);
-  else for (;;) vTaskDelay(pdMS_TO_TICKS(50));  /* sit past the canary */
+  else plunge();                     /* walk to the edge, step over it */
 }
 static void victimTask(void *)
 {
